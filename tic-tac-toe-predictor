@@ -1,0 +1,198 @@
+from sklearn.tree import DecisionTreeClassifier
+import requests
+
+webhook_url = ' ' # Enter your webhook
+
+EMPTY = ' '
+PLAYER_X = 'X'
+PLAYER_O = 'O'
+NUM_ROWS = 3
+NUM_COLS = 3
+
+sent = False
+
+def display_board(board):
+    print("    1   2   3")
+    print("  +---+---+---+")
+    for i in range(NUM_ROWS):
+        print(f"{i+1} |", end=" ")
+        for j in range(NUM_COLS):
+            print(board[i][j], "|", end=" ")
+        print("\n  +---+---+---+")
+
+def check_win(board, player):
+    for i in range(NUM_ROWS):
+        if board[i][0] == player and board[i][1] == player and board[i][2] == player:
+            return True
+        if board[0][i] == player and board[1][i] == player and board[2][i] == player:
+            return True
+    if board[0][0] == player and board[1][1] == player and board[2][2] == player:
+        return True
+    if board[0][2] == player and board[1][1] == player and board[2][0] == player:
+        return True
+    return False
+
+def check_draw(board):
+    for i in range(NUM_ROWS):
+        for j in range(NUM_COLS):
+            if board[i][j] == EMPTY:
+                return False
+    return True
+
+def get_move():
+    while True:
+        move = input("Enter your move (row, col): ")
+        if move == "reset" or move == "restart":
+            return move
+        try:
+            row, col = map(int, move.split(','))
+        except ValueError:
+            print("Invalid input. Please enter row and column separated by comma (e.g., 1,2).")
+            continue
+        if row < 1 or row > 3 or col < 1 or col > 3:
+            print("Invalid input. Row and column must be between 1 and 3.")
+            continue
+        return row - 1, col - 1
+
+def get_best_move(board):
+    X_moves = []
+    X_moves_index = []
+    for i in range(NUM_ROWS):
+        for j in range(NUM_COLS):
+            if board[i][j] == EMPTY:
+                X_moves.append([i, j])
+                X_moves_index.append(i * 3 + j)
+    if not X_moves:
+        return None
+    X_features = [[0] * 9]
+    for move_index in X_moves_index:
+        X_features[0][move_index] = 1
+
+    # Check for defense and offense moves
+    for i in range(NUM_ROWS):
+        # Defense: Check rows for opponent's two-in-a-row
+        if board[i][0] == PLAYER_O and board[i][1] == PLAYER_O and board[i][2] == EMPTY:
+            return i, 2
+        if board[i][0] == PLAYER_O and board[i][2] == PLAYER_O and board[i][1] == EMPTY:
+            return i, 1
+        if board[i][1] == PLAYER_O and board[i][2] == PLAYER_O and board[i][0] == EMPTY:
+            return i, 0
+        # Offense: Check rows for player's two-in-a-row
+        if board[i][0] == PLAYER_X and board[i][1] == PLAYER_X and board[i][2] == EMPTY:
+            return i, 2
+        if board[i][0] == PLAYER_X and board[i][2] == PLAYER_X and board[i][1] == EMPTY:
+            return i, 1
+        if board[i][1] == PLAYER_X and board[i][2] == PLAYER_X and board[i][0] == EMPTY:
+            return i, 0
+        # Defense: Check columns for opponent's two-in-a-row
+        if board[0][i] == PLAYER_O and board[1][i] == PLAYER_O and board[2][i] == EMPTY:
+            return 2, i
+        if board[0][i] == PLAYER_O and board[2][i] == PLAYER_O and board[1][i] == EMPTY:
+            return 1, i
+        if board[1][i] == PLAYER_O and board[2][i] == PLAYER_O and board[0][i] == EMPTY:
+            return 0, i
+        # Offense: Check columns for player's two-in-a-row
+        if board[0][i] == PLAYER_X and board[1][i] == PLAYER_X and board[2][i] == EMPTY:
+            return 2, i
+        if board[0][i] == PLAYER_X and board[2][i] == PLAYER_X and board[1][i] == EMPTY:
+            return 1, i
+        if board[1][i] == PLAYER_X and board[2][i] == PLAYER_X and board[0][i] == EMPTY:
+            return 0, i
+    # Defense: Check diagonals for opponent's two-in-a-row
+    if board[0][0] == PLAYER_O and board[1][1] == PLAYER_O and board[2][2] == EMPTY:
+        return 2, 2
+    if board[0][0] == PLAYER_O and board[2][2] == PLAYER_O and board[1][1] == EMPTY:
+        return 1, 1
+    if board[1][1] == PLAYER_O and board[2][2] == PLAYER_O and board[0][0] == EMPTY:
+        return 0, 0
+    if board[0][2] == PLAYER_O and board[1][1] == PLAYER_O and board[2][0] == EMPTY:
+        return 2, 0
+    if board[0][2] == PLAYER_O and board[2][0] == PLAYER_O and board[1][1] == EMPTY:
+        return 1, 1
+    if board[1][1] == PLAYER_O and board[2][0] == PLAYER_O and board[0][2] == EMPTY:
+        return 0, 2
+
+    # Check for offense moves
+    for i in range(NUM_ROWS):
+        if board[i][0] == PLAYER_X and board[i][1] == PLAYER_X and board[i][2] == EMPTY:
+            return i, 2
+        if board[i][0] == PLAYER_X and board[i][2] == PLAYER_X and board[i][1] == EMPTY:
+            return i, 1
+        if board[i][1] == PLAYER_X and board[i][2] == PLAYER_X and board[i][0] == EMPTY:
+            return i, 0
+        if board[0][i] == PLAYER_X and board[1][i] == PLAYER_X and board[2][i] == EMPTY:
+            return 2, i
+        if board[0][i] == PLAYER_X and board[2][i] == PLAYER_X and board[1][i] == EMPTY:
+            return 1, i
+        if board[1][i] == PLAYER_X and board[2][i] == PLAYER_X and board[0][i] == EMPTY:
+            return 0, i
+
+    # If no defensive or offensive moves, return the best predicted move
+    y_pred = clf.predict(X_features)
+    best_move = X_moves[y_pred[0]]
+    return best_move[0], best_move[1]
+
+def play_game():
+    board = [[EMPTY for _ in range(NUM_COLS)] for _ in range(NUM_ROWS)]
+    current_player = PLAYER_X
+    winner = None
+    draw = False
+
+    while not winner and not draw:
+        display_board(board)
+        if current_player == PLAYER_X:
+            print("Player X, it's your turn.")
+            row, col = get_best_move(board)
+            if row is None:
+                print("No valid moves left. It's a draw!")
+                break
+            message_content = "Player X suggests row: {}, col: {} as the best move.".format(row + 1, col + 1)
+
+            payload = {
+                "content": message_content
+            }
+
+            response = requests.post(webhook_url, json=payload)
+            if response.status_code == 204:
+                sent = True
+
+            row, col = get_move()
+            if board[row][col] != EMPTY:
+                print("Invalid move. That spot is already taken. Try again.")
+                continue
+            board[row][col] = current_player
+        else:
+            print("Player O, it's your turn.")
+            row, col = get_move()
+            if board[row][col] != EMPTY:
+                print("Invalid move. That spot is already taken. Try again.")
+                continue
+            board[row][col] = current_player
+
+        if check_win(board, PLAYER_X):
+            winner = PLAYER_X
+        elif check_win(board, PLAYER_O):
+            winner = PLAYER_O
+        elif check_draw(board):
+            draw = True
+
+        if current_player == PLAYER_X:
+            current_player = PLAYER_O
+        else:
+            current_player = PLAYER_X
+
+    display_board(board)
+    if winner:
+        print(f"Player {winner} wins!")
+    elif draw:
+        print("It's a draw!")
+
+if __name__ == '__main__':
+    clf = DecisionTreeClassifier()
+
+    X = [[1, 0, 0, 0, 1, 0, 0, 0, 0], [0, 0, 1, 0, 1, 0, 0, 0, 0], [0, 0, 0, 0, 0, 1, 0, 1, 0], [0, 0, 0, 0, 0, 0, 0, 0, 1], [0, 0, 0, 0, 0, 0, 1, 0, 0]]
+    y = [0, 0, 1, 2, 3]
+
+    clf.fit(X, y)
+
+    play_game()
