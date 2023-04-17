@@ -1,0 +1,129 @@
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.common.exceptions import StaleElementReferenceException
+import time
+import os
+import numpy as np
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import SimpleRNN, Dense
+import requests
+
+webhook_url = ' ' # Enter your discord webhook url
+
+wins = 0
+losses = 0
+inicial_bits = 365
+bits = 365
+euros = 0
+
+negatives = 0
+reached = 0
+
+driver = webdriver.Chrome()
+url = 'https://www.bustabit.com/play' 
+driver.get(url)
+
+data = []
+prev_data = []
+next_number = None
+prediction = None
+prediction_made = False
+
+count = 5
+for i in range(count):
+    os.system('cls')
+    print(f'{count} seconds left')
+    count -= 1
+    time.sleep(1)
+
+while True:
+    try:
+        if bits >= 20:
+            bits = inicial_bits
+            reached += 1
+        elif bits <= 0:
+            bits = inicial_bits
+            negatives += 1
+        table = driver.find_element(By.XPATH, '//*[@id="root"]/div/div/div[6]/div/div[2]/div/table/tbody')
+        rows = table.find_elements(By.XPATH, './tr')
+        for row in reversed(rows):
+            try:
+                multiplier = row.find_element(By.XPATH, './td[1]/a')
+                if "," in multiplier.text:
+                    multiplier_value = float(multiplier.text.replace(",", "").replace("x", " "))
+                else:
+                    multiplier_value = float(multiplier.text.replace("x", " "))
+                    if multiplier_value not in data:
+                        data.append(multiplier_value)
+            except StaleElementReferenceException:
+                continue
+        if data != prev_data:
+            print(list(reversed(data)))
+            prev_data = data.copy()
+
+            if prediction_made == True:
+                result = None
+                for row in reversed(rows):
+                        multiplier = row.find_element(By.XPATH, './td[1]/a')
+                        if "," in multiplier.text:
+                            multiplier_value = float(multiplier.text.replace(",", "").replace("x", " "))
+                        else:
+                            multiplier_value = float(multiplier.text.replace("x", " "))
+                            if multiplier_value > 2 and prediction == "above 2x":
+                                result = "win"
+                            elif multiplier_value < 2 and prediction == "above 2x":
+                                result = "loss"
+                            elif prediction == "below 2x":
+                                result = "don't bet"
+                if result == "win":
+                    bits += 1
+                    wins += 1
+                    euros = bits*0.02726
+                    wins_rate = (wins*100) // (wins+losses)
+                    message_content = "{} Wins, Win Rate: {}%. Length of data: {}. Total Balance: {} bits or {:.2f}€. Went negative {} times and doubled balance {} times.".format(wins, wins_rate, len(data), bits, euros, negatives, reached)
+                    print(f'Wins Total: {wins}, Win rate: {wins_rate}%. Length of data: {len(data)}. Current Balance \033[32m{bits} bits or {euros:.2f}€\033[0m.')
+                elif result == "loss":
+                    losses += 1
+                    bits -= 1
+                    euros = bits*0.02726
+                    losses_rate = (losses*100) // (wins+losses)
+                    message_content = "{} Losses, Loss Rate: {}%. Length of data: {}. Total Balance: {} bits or {:.2f}€. Went negative {} times and doubled balance {} times.".format(losses, losses_rate, len(data), bits, euros, negatives, reached)
+                    print(f'Losses Total: {losses}, Loss rate: {losses_rate}%. Length of data: {len(data)}. Current Balance \033[32m{bits} bits or {euros:.2f}€\033[0m.')
+                elif result == "don't bet":
+                    message_content = ":warning: Skipping due to prediction bellow 2x :warning:"
+
+                payload = {
+                    "content": message_content
+                }
+
+                response = requests.post(webhook_url, json=payload)
+                if response.status_code == 204:
+                    print("Message sent successfully to Discord webhook.")
+                else:
+                    print("Failed to send message to Discord webhook. Status code: {}".format(response.status_code))
+
+            X = np.array(data[:-1]).reshape(-1, 1)
+            y = np.array(data[1:]).reshape(-1, 1)
+            model = Sequential()
+            model.add(SimpleRNN(units=32, activation='tanh', input_shape=(1, 1)))
+            model.add(Dense(units=1))
+            model.compile(optimizer='adam', loss='mse')
+            model.fit(X, y, epochs=10, batch_size=1)
+
+            next_number = model.predict(np.array([data[-1]]).reshape(1, 1, 1))
+
+            if next_number >= 2:
+                next_number_scalar = next_number.item()
+                print(f'\033[32mAbove 2x.\033[0m \033[93mPrediction is: {next_number_scalar}x or {next_number_scalar:.0f}x\033[0m')
+                prediction = "above 2x"
+                prediction_made = True
+            else:
+                next_number_scalar = next_number.item()
+                print(f'\033[31mBelow 2x.\033[0m \033[93mPrediction is: {next_number_scalar}x or {next_number_scalar:.0f}x\033[0m')
+                prediction = "bellow 2x"
+                prediction_made = True
+
+        time.sleep(0.1)
+
+    except StaleElementReferenceException:
+        continue
